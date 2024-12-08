@@ -149,3 +149,4 @@ def video_report(video_path: str):
         f.write(end_report)
 
     print("\n--- Video Analysis Completed ---")
+    return end_report
