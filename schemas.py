@@ -13,4 +13,5 @@ class FrameAnalysis(BaseModel):
 class Context(BaseModel):
     game: str
     category: str
+    focus_points: List[str]
     notes:  List[str]

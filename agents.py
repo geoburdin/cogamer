@@ -1,4 +1,5 @@
 import os
+import random
 from video_utils import extract_frames
 from typing import List
 from langchain_anthropic import ChatAnthropic
@@ -16,9 +17,44 @@ ANTHROPIC_API_KEY = "YOUR_ANTHROPIC_API_KEY"
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
 # LangChain Model Setup
-# model = ChatAnthropic(model="claude-3-opus-20240229", anthropic_api_key=ANTHROPIC_API_KEY)
 model = ChatOpenAI(model="gpt-4o-mini", openai_api_key=OPENAI_API_KEY)  # Uncomment for OpenAI
 structured_llm = model.with_structured_output(FrameAnalysis)
+
+# --- Sub-Agent for Game Detection and Focus Points ---
+@traceable
+def detect_game_and_focus_points(frames_data: List[str]) -> dict:
+    """Analyze random frames to detect the game and focus points for analysis."""
+    print("Sub-Agent: Analyzing random frames to detect game and focus points...")
+
+    message = HumanMessage(
+        content=[
+                    {"type": "text",
+                     "text": """
+             You are an expert gaming analyst. Analyze the following gameplay frames to detect:
+             1. The name of the game (if possible).
+             2. Key focus points to analyze during the video, such as:
+                - Map layout and navigation
+                - Movement techniques (e.g., jumps, glitches, skips)
+                - Objects for interaction (e.g., doors, platforms, enemies)
+                - Special mechanics or strategies relevant to this game.
+             Be specific, professional, and use gaming terminology."""},
+                ] + [
+                    {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{frame}"}}
+                    for frame in frames_data
+                ]
+    )
+
+    # Invoke the model
+    result = model.invoke([message])
+    print("Sub-Agent Results:", result.content)
+
+    # Parse the content into a usable dictionary
+    try:
+        parsed_result = eval(result.content)
+        return parsed_result
+    except Exception as e:
+        print(f"Error parsing sub-agent result: {e}")
+        return {"game": "Unknown", "focus_points": []}
 
 # --- Frame Analysis Function ---
 @traceable
@@ -30,24 +66,14 @@ def analyze_frame(frame_id: int, frames_data: List[str], context: Context) -> di
                     {"type": "text",
                      "text": f"""
              You are a professional speedrun commentator analyzing a gameplay video of '{context.game}' in the category '{context.category}'.
-             Your goal is to analyze this segment of the video, identify key strategies, tricks, and inefficiencies, and contribute to the global understanding of the speedrun.
-
-             Focus on the following:
-             1. **Frame-Specific Analysis**:
-                 - Identify tricks, skips, glitches, or optimizations used.
-                 - Provide professional-level commentary with precise terminology (e.g., wall clips, route skips, jump chaining, frame-perfect tricks).
-                 - Highlight good execution, mistakes, and inefficiencies.
-
-             2. **Global Notes** (New Knowledge for the Speedrun):
-                 - Add only information that improves the global understanding of the entire speedrun.
-                 - For example: overall routing decisions, consistent techniques being used, recurring glitches, or notable strategies seen in this segment, storylines, or character development.
-                 - Leave this field empty if no new global information is detected.
-
-             Current Global Context:
-             {context.notes}
-
-             Here are the frames from the last 10 seconds (Frame {frame_id-10} to {frame_id}):
-             """},
+             Focus on these key points during analysis: {context.focus_points}.
+             
+             Provide the following:
+             1. Frame-specific analysis:
+                 - Tricks, skips, glitches, and movement optimizations.
+                 - Mistakes or inefficiencies.
+                 - Execution precision and routing decisions.
+             2. New global notes for the speedrun (if applicable)."""},
                 ] + [
                     {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{frame}"}}
                     for frame in frames_data
@@ -72,10 +98,9 @@ def analyze_frame(frame_id: int, frames_data: List[str], context: Context) -> di
 
     return result
 
-# placeholder Summarization ---
+# --- Summarization Function ---
 @traceable
 def summarize_results(results: List[dict], context: Context) -> str:
-    """Summarize the results from all frames."""
     summary = {
         "total_frames_analyzed": len(results),
         "global_context": context.notes,
@@ -96,16 +121,15 @@ def generate_end_report(summary: str) -> str:
 
     # Prepare text content for the model
     report_request = f"""
-    Here are the analyses from per second frames extracted from a video.
+    Here is the structured analysis of a gameplay video:
 
     {summary}
 
-    Please analyze these findings and prepare a detailed speedrun report. Highlight:
-    - Describe the overall gameplay, feel free to write a narrative
-    - Overall performance
-    - Common mistakes or inefficiencies
-    - Best tricks observed
-    - Key recommendations for improvement
+    Write a detailed report highlighting:
+    - The overall gameplay and performance
+    - Key mistakes or inefficiencies
+    - Best strategies, tricks, and optimizations
+    - Final recommendations for improvement.
     """
 
     # Use the model to generate the end report
@@ -115,7 +139,7 @@ def generate_end_report(summary: str) -> str:
     # Return the textual report
     return result.content
 
-
+# --- Main Video Analysis Function ---
 @traceable
 def video_report(video_path: str):
     # Step 1: Extract frames
@@ -123,10 +147,22 @@ def video_report(video_path: str):
     frames = extract_frames(video_path, FRAME_RATE)
     print(f"Extracted {len(frames)} frames.")
 
-    # Step 2: Initialize context and process frames
-    results = []
-    global_context = Context(game="Minecraft", category="Speedrun Analysis", notes=[])
+    # Step 1: Sub-Agent to analyze random frames
+    random_indices = random.sample(range(len(frames)), min(10, len(frames)))
+    random_frames = [frames[i] for i in random_indices]
+    initial_analysis = detect_game_and_focus_points(random_frames)
+    print(f"Sub-Agent Findings: {initial_analysis}")
 
+    # Initialize global context
+    global_context = Context(
+        game=initial_analysis.get("game", "Unknown"),
+        category="Speedrun Analysis",
+        focus_points=initial_analysis.get("focus_points", []),
+        notes=[]
+    )
+
+    # Step 2: Analyze all frames
+    results = []
     for i in range(10, len(frames), 10):  # Sliding window of 10 frames
         batch_frames = frames[i-10:i]
         analysis = analyze_frame(i, batch_frames, global_context)
