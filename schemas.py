@@ -17,5 +17,5 @@ class Context(BaseModel):
     notes:  List[str]
 
 class DetectGameFocusPoints(BaseModel):
-    game: str
-    focus_points: List[str]
+    game: str = Field(..., description="The name of the game being played in the video.")
+    focus_points: List[str] = Field(..., description="Key points to focus on during the analysis.")

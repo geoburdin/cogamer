@@ -17,7 +17,7 @@ ANTHROPIC_API_KEY = "YOUR_ANTHROPIC_API_KEY"
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
 # LangChain Model Setup
-model = ChatOpenAI(model="gpt-4o-mini", openai_api_key=OPENAI_API_KEY)  # Uncomment for OpenAI
+model = ChatOpenAI(model="gpt-4o-mini", openai_api_key=OPENAI_API_KEY)
 structured_llm_frame_analysis = model.with_structured_output(FrameAnalysis)
 structured_llm_detect_game_focus_points = model.with_structured_output(DetectGameFocusPoints)
 
@@ -33,11 +33,7 @@ def detect_game_and_focus_points(frames_data: List[str]) -> dict:
                      "text": """
              You are an expert gaming analyst. Analyze the following gameplay frames to detect:
              1. The name of the game (if possible).
-             2. Key focus points to analyze during the video, such as:
-                - Map layout and navigation
-                - Movement techniques (e.g., jumps, glitches, skips)
-                - Objects for interaction (e.g., doors, platforms, enemies)
-                - Special mechanics or strategies relevant to this game.
+             2. Key focus points to analyze during the video, such as specific tricks, objects important for the gamer community or strategies.
              Be specific, professional, and use gaming terminology."""},
                 ] + [
                     {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{frame}"}}
@@ -47,7 +43,8 @@ def detect_game_and_focus_points(frames_data: List[str]) -> dict:
 
     # Invoke the model
     result = structured_llm_detect_game_focus_points.invoke([message])
-    print("Sub-Agent Results:", result.content)
+    result = result.model_dump()
+    print("Sub-Agent Results:", result)
 
     # Parse the content into a usable dictionary
     return result
