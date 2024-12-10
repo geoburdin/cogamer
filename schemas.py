@@ -15,3 +15,7 @@ class Context(BaseModel):
     category: str
     focus_points: List[str]
     notes:  List[str]
+
+class DetectGameFocusPoints(BaseModel):
+    game: str
+    focus_points: List[str]

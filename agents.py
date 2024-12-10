@@ -4,7 +4,7 @@ from video_utils import extract_frames
 from typing import List
 from langchain_anthropic import ChatAnthropic
 from langchain_openai import ChatOpenAI
-from schemas import FrameAnalysis, Context
+from schemas import FrameAnalysis, Context, DetectGameFocusPoints
 import dotenv
 from langchain_core.messages import HumanMessage
 from langsmith import traceable
@@ -18,7 +18,8 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
 # LangChain Model Setup
 model = ChatOpenAI(model="gpt-4o-mini", openai_api_key=OPENAI_API_KEY)  # Uncomment for OpenAI
-structured_llm = model.with_structured_output(FrameAnalysis)
+structured_llm_frame_analysis = model.with_structured_output(FrameAnalysis)
+structured_llm_detect_game_focus_points = model.with_structured_output(DetectGameFocusPoints)
 
 # --- Sub-Agent for Game Detection and Focus Points ---
 @traceable
@@ -45,16 +46,11 @@ def detect_game_and_focus_points(frames_data: List[str]) -> dict:
     )
 
     # Invoke the model
-    result = model.invoke([message])
+    result = structured_llm_detect_game_focus_points.invoke([message])
     print("Sub-Agent Results:", result.content)
 
     # Parse the content into a usable dictionary
-    try:
-        parsed_result = eval(result.content)
-        return parsed_result
-    except Exception as e:
-        print(f"Error parsing sub-agent result: {e}")
-        return {"game": "Unknown", "focus_points": []}
+    return result
 
 # --- Frame Analysis Function ---
 @traceable
@@ -81,7 +77,7 @@ def analyze_frame(frame_id: int, frames_data: List[str], context: Context) -> di
     )
 
     # Invoke the structured model
-    result = structured_llm.invoke([message])
+    result = structured_llm_frame_analysis.invoke([message])
     result = result.model_dump()
 
     result["timestamp_id"] = f"{frame_id-10}-{frame_id} seconds of the video"
