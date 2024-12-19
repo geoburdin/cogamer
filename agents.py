@@ -2,7 +2,6 @@ import os
 import random
 from video_utils import extract_frames
 from typing import List
-from langchain_anthropic import ChatAnthropic
 from langchain_openai import ChatOpenAI
 from schemas import FrameAnalysis, Context, DetectGameFocusPoints
 import dotenv
@@ -13,7 +12,6 @@ dotenv.load_dotenv()
 
 # --- Configuration ---
 FRAME_RATE = 1  # Extract 1 frame per second
-ANTHROPIC_API_KEY = "YOUR_ANTHROPIC_API_KEY"
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
 # LangChain Model Setup
