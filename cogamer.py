@@ -1,5 +1,5 @@
-# real_time_gaming_assistant.py
-
+# cogamer.py
+import datetime
 import asyncio
 import base64
 import json
@@ -382,6 +382,23 @@ Assistant:
             self.global_context.frame_analysis_results.append(analysis)
             logging.info(f"Frame analysis added for frames {analysis['timestamp_id']}.")
 
+            # **New Code to Save Analysis to Data Folder**
+            # Ensure the 'data' directory exists
+            os.makedirs("data", exist_ok=True)
+            os.makedirs("data/analysis_reports", exist_ok=True)
+
+            # Define the filename with timestamp to avoid overwriting
+            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            analysis_filename = f"data/analysis_reports/frame_analysis_{timestamp}.json"
+
+            # Save the analysis_result to the JSON file
+            try:
+                with open(analysis_filename, 'w') as f:
+                    json.dump(analysis, f, indent=2)
+                logging.info(f"Frame analysis saved to '{analysis_filename}'.")
+            except Exception as e:
+                logging.error(f"Failed to save frame analysis: {e}")
+
     @traceable
     async def listen_audio(self):
         """Capture audio from the microphone and send to the model."""
@@ -417,7 +434,6 @@ Assistant:
         while True:
             msg = await self.out_queue.get()
             await self.ws.send(json.dumps(msg))
-            logging.info("Real-time media sent to assistant.")
 
     @traceable
     async def receive_audio(self):
@@ -495,7 +511,8 @@ Assistant:
         logging.info("\n--- Final Summarized Report ---")
         print(end_report)
         os.makedirs("data", exist_ok=True)
-        with open("data/end_report.txt", "w") as f:
+        os.makedirs("data/summary_reports", exist_ok=True)
+        with open("data/summary_reports/end_report.txt", "w") as f:
             f.write(end_report)
         logging.info("Final report saved to 'data/end_report.txt'.")
 
