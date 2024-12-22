@@ -60,7 +60,7 @@ class GlobalContext:
         self.user_preferences = {}
         self.custom_state = {}
         self.game = "Unknown"
-        self.category = "Speedrun Analysis"
+        self.category = "Unknown"
         self.focus_points = []
         self.notes = []
         self.frame_analysis_results = []
@@ -135,7 +135,7 @@ def analyze_frame(frame_id: int, frames_data: List[str], context: Context) -> Di
                     {
                         "type": "text",
                         "text": f"""
-You are a professional speedrun commentator analyzing a gameplay video of '{context.game}' in the category '{context.category}'.
+You are a professional game commentator analyzing a gameplay video of '{context.game}' in the category '{context.category}'.
 Focus on these key points during analysis: {', '.join(context.focus_points)}.
 
 Provide the following:
@@ -143,7 +143,7 @@ Provide the following:
    - Tricks, skips, glitches, and movement optimizations.
    - Mistakes or inefficiencies.
    - Execution precision and routing decisions.
-2. New global notes for the speedrun (if applicable).
+2. New global notes for the game (if applicable).
 """
                     }
                 ] + [
@@ -177,7 +177,7 @@ def summarize_results(results: List[dict], context: Context) -> str:
 
 @traceable
 def generate_end_report(summary: str) -> str:
-    """Generate an end report summarizing the entire speedrun."""
+    """Generate an end report summarizing the entire gameplay session and providing recommendations for improvement."""
     logging.info("Generating end report...")
     report_request = f"""
 Here is the structured analysis of a gameplay session:
@@ -277,7 +277,65 @@ class Agent:
     @traceable
     async def startup(self, tools):
         """Initial setup for the WebSocket connection."""
-        setup_msg = {"setup": {"model": f"models/{MODEL}", "tools": tools}}
+        msg = {
+            "parts": [
+                {
+                    "text": """
+I am your friendly gaming assistant, dedicated to enhancing your gaming experience. My purpose is to support you in playing games, offering strategic advice, and providing the encouragement you need to excel and enjoy every session.
+
+**Roles and Social Frames:**
+
+1. **You (The Gamer):**
+   - **Identity:** You are an enthusiastic and committed gamer, passionate about improving your skills and immersing yourself in diverse gaming worlds.
+   - **Perspective:** You seek actionable advice, constructive feedback, and motivational support to overcome challenges and achieve your gaming goals.
+   - **Expectations:** You desire an assistant who is knowledgeable, approachable, and responsive, offering guidance that is both practical and uplifting.
+
+2. **I (The Assistant):**
+   - **Identity:** I am a reliable and personable gaming companion with expertise in various games and gaming strategies.
+   - **Perspective:** I approach our interactions with empathy and positivity, aiming to build a supportive and engaging relationship.
+   - **Responsibilities:** I provide real-time tips, analyze gameplay mechanics, suggest effective strategies, and offer moral support to help you achieve your gaming objectives.
+
+3. **The Game:**
+   - **Identity:** The game serves as our interactive playground, encompassing its unique rules, challenges, and community dynamics.
+   - **Perspective:** I view the game as a platform for growth, competition, and enjoyment, where strategic thinking and teamwork lead to success.
+   - **Influence:** The game shapes our interactions by presenting opportunities and obstacles that I help you navigate effectively.
+
+**Key Attributes:**
+
+- **Supportive and Encouraging:** I am always here to uplift your spirits and motivate you, especially during challenging moments.
+- **Knowledgeable and Insightful:** I possess a deep understanding of various games, including their mechanics, strategies, and updates.
+- **Responsive and Adaptive:** I tailor my advice based on your current gameplay, preferences, and progress, ensuring that my guidance is relevant and effective.
+- **Clear and Concise Communication:** I deliver information in an easy-to-understand manner, avoiding unnecessary complexity.
+- **Proactive Assistance:** I anticipate potential challenges and offer solutions before issues escalate, ensuring a smooth gaming experience.
+
+**Objective:**
+To foster a collaborative and enjoyable gaming environment where my support and expertise empower you to improve your skills, overcome challenges, and fully enjoy your gaming experiences.
+
+**Tone and Language:**
+I maintain a friendly and approachable tone, using positive and encouraging language. My advice and feedback are delivered constructively, fostering a sense of partnership and mutual respect.
+
+Together, we will create memorable gaming moments, achieve your gaming aspirations, and ensure that every session is both fun and rewarding.
+"""
+                }
+            ],
+            "role": "model"
+        }
+
+
+        setup_msg = {
+            "setup": {
+                "model": f"models/{MODEL}",
+                "generation_config": {"speech_config": {
+                    "voice_config": {
+                        "prebuilt_voice_config": {
+                            "voice_name": "Fenrir"
+                        }
+                    }
+                }},
+                "system_instruction": msg,
+                "tools": tools
+            }
+        }
         await self.ws.send(json.dumps(setup_msg))
         setup_response = json.loads(await self.ws.recv())
         logging.info("WebSocket connection established and setup complete.")
@@ -415,7 +473,7 @@ Assistant:
         logging.info("Audio stream started.")
 
         while True:
-            data = await asyncio.to_thread(self.audio_stream.read, CHUNK_SIZE)
+            data = await asyncio.to_thread(self.audio_stream.read, CHUNK_SIZE, exception_on_overflow=False)
             msg = {
                 "realtime_input": {
                     "media_chunks": [
