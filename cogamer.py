@@ -333,7 +333,8 @@ Together, we will create memorable gaming moments, achieve your gaming aspiratio
                     }
                 }},
                 "system_instruction": msg,
-                "tools": tools
+                "tools": tools,
+
             }
         }
         await self.ws.send(json.dumps(setup_msg))
