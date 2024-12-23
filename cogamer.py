@@ -510,9 +510,18 @@ Assistant:
                 pcm_data = base64.b64decode(inline_data)
                 self.audio_in_queue.put_nowait(pcm_data)
 
-            turn_complete = response.get("serverContent", {}).get("turnComplete", False)
-            if turn_complete:
-                logging.info("\n[Assistant] End of turn")
+            try:
+                turn_complete = response["serverContent"]["turnComplete"]
+            except KeyError:
+                pass
+            else:
+                if turn_complete:
+                    # If you interrupt the model, it sends an end_of_turn.
+                    # For interruptions to work, we need to empty out the audio queue
+                    # Because it may have loaded much more audio than has played yet.
+                    print("\nEnd of turn")
+                    while not self.audio_in_queue.empty():
+                        self.audio_in_queue.get_nowait()
 
             tool_call = response.get('toolCall')
             if tool_call is not None:
