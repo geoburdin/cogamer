@@ -325,16 +325,20 @@ Together, we will create memorable gaming moments, achieve your gaming aspiratio
         setup_msg = {
             "setup": {
                 "model": f"models/{MODEL}",
-                "generation_config": {"speech_config": {
-                    "voice_config": {
+                "generation_config":
+                    {
+                    "speech_config":
+                        {
+                            "voice_config": {
                         "prebuilt_voice_config": {
-                            "voice_name": "Fenrir"
+                            "voice_name": os.getenv("VOICE_NAME")
                         }
                     }
-                }},
+                        },
+                    "temperature": 0,
+                    },
                 "system_instruction": msg,
-                "tools": tools,
-
+                "tools": tools
             }
         }
         await self.ws.send(json.dumps(setup_msg))
