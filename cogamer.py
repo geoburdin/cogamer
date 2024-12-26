@@ -54,35 +54,58 @@ structured_llm_detect_game_focus_points = model.with_structured_output(DetectGam
 # Global Context Class
 # -----------------------------
 
+import json
+import os
+from datetime import datetime
+
 class GlobalContext:
     def __init__(self):
-        self.conversation_history = []
-        self.user_preferences = {}
-        self.custom_state = {}
-        self.game = "Unknown"
-        self.category = "Unknown"
-        self.focus_points = []
-        self.notes = []
-        self.frame_analysis_results = []
+        self.conversation_history = []  # List of messages exchanged (role, text)
+        self.user_preferences = {}  # Dictionary of user preferences
+        self.custom_state = {}  # Dictionary for custom state data (e.g., settings, flags)
+        self.game = "Unknown"  # The current game being analyzed
+        self.category = "Unknown"  # The category of the game (e.g., FPS, RPG)
+        self.focus_points = []  # List of key focus points for analysis
+        self.notes = []  # Notes for analysis or gameplay insights
+        self.frame_analysis_results = []  # Results of frame analysis
+        self.timestamp = None  # Timestamp of the context state (last update)
+        self.is_describing = False  # Flag to control continuous description mode
 
-    @traceable
     def add_message(self, role: str, text: str):
-        self.conversation_history.append((role, text))
+        """Add a message to the conversation history."""
+        self.conversation_history.append({"role": role, "text": text})
 
-    @traceable
-    def get_history(self):
-        return self.conversation_history
+    def get_history(self, last_n: int = 5):
+        """Get the last N messages from the conversation history."""
+        return self.conversation_history[-last_n:]
 
-    @traceable
     def set_preference(self, key: str, value):
+        """Set a user preference."""
         self.user_preferences[key] = value
 
-    @traceable
     def get_preference(self, key: str, default=None):
+        """Get a user preference."""
         return self.user_preferences.get(key, default)
 
-    @traceable
-    def to_json(self):
+    def update_game_info(self, game: str, category: str):
+        """Update the current game and its category."""
+        self.game = game
+        self.category = category
+
+    def set_focus_points(self, focus_points: list):
+        """Set the focus points for game analysis."""
+        self.focus_points = focus_points
+
+    def add_note(self, note: str):
+        """Add a note for the game or analysis."""
+        self.notes.append(note)
+
+    def add_frame_analysis_result(self, result: dict):
+        """Add a result from frame analysis."""
+        self.frame_analysis_results.append(result)
+
+    def to_dict(self):
+        """Convert the context to a dictionary."""
         return {
             "conversation_history": self.conversation_history,
             "user_preferences": self.user_preferences,
@@ -91,10 +114,52 @@ class GlobalContext:
             "category": self.category,
             "focus_points": self.focus_points,
             "notes": self.notes,
-            "frame_analysis_results": self.frame_analysis_results
+            "frame_analysis_results": self.frame_analysis_results,
+            "timestamp": self.timestamp,
+            "is_describing": self.is_describing,
         }
 
-global_context = GlobalContext()
+    @staticmethod
+    def from_dict(data):
+        """Load the context from a dictionary."""
+        context = GlobalContext()
+        context.conversation_history = data.get("conversation_history", [])
+        context.user_preferences = data.get("user_preferences", {})
+        context.custom_state = data.get("custom_state", {})
+        context.game = data.get("game", "Unknown")
+        context.category = data.get("category", "Unknown")
+        context.focus_points = data.get("focus_points", [])
+        context.notes = data.get("notes", [])
+        context.frame_analysis_results = data.get("frame_analysis_results", [])
+        context.timestamp = data.get("timestamp", None)
+        context.is_describing = data.get("is_describing", False)
+        return context
+
+    def save_to_file(self, filename="global_context.json"):
+        """Save the context to a JSON file."""
+        self.timestamp = self._get_current_timestamp()  # Update timestamp
+        with open(filename, 'w') as f:
+            json.dump(self.to_dict(), f, indent=2)
+        logging.info(f"Global context saved to '{filename}'.")
+
+    @staticmethod
+    def load_from_file(filename="global_context.json"):
+        """Load the context from a JSON file."""
+        if os.path.exists(filename):
+            with open(filename, 'r') as f:
+                data = json.load(f)
+            logging.info(f"Global context loaded from '{filename}'.")
+            return GlobalContext.from_dict(data)
+        else:
+            logging.info(f"No existing context file found. Initializing new context.")
+            return GlobalContext()  # Return empty context if file doesn't exist
+
+    def _get_current_timestamp(self):
+        """Get the current timestamp for the context."""
+        return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+# Initialize Global Context
+global_context = GlobalContext.load_from_file()
 
 # -----------------------------
 # Background Frame Analysis
@@ -230,7 +295,7 @@ async def handle_tool_call(ws, tool_call):
     arguments = function_call["args"]
 
     if function_name == "save_user_preferences":
-        await save_user_preferences(str(global_context.to_json()))
+        await save_user_preferences(str(global_context.to_dict()))
         response = "User preferences saved to 'user_preferences.txt'."
     elif function_name == "remember_user_preferences":
         key = arguments.get("key")
@@ -273,14 +338,31 @@ class Agent:
         self.audio_stream = None
         self.collected_frames = []  # Store raw frames as base64 for analysis
         self.frame_counter = 0
+        self.description_task = None  # Task for sending continuous descriptions
 
     @traceable
-    async def startup(self, tools):
+    async def startup(self, tools, is_restart=False):
         """Initial setup for the WebSocket connection."""
-        msg = {
-            "parts": [
-                {
-                    "text": """
+        if is_restart:
+            # Extract the last few messages for context restoration
+            last_messages = self.global_context.get_history(last_n=5)
+            formatted_messages = "\n".join([f"{msg['role'].capitalize()}: {msg['text']}" for msg in last_messages])
+            continuation_prompt = f"Continue, here is the past discussion:\n{formatted_messages}\nDon't say 'ok I continue', just continue."
+
+            msg = {
+                "parts": [
+                    {
+                        "text": continuation_prompt
+                    }
+                ],
+                "role": "model"
+            }
+        else:
+            # Initial system instructions
+            msg = {
+                "parts": [
+                    {
+                        "text": """
 I am your friendly gaming assistant, dedicated to enhancing your gaming experience. My purpose is to support you in playing games, offering strategic advice, and providing the encouragement you need to excel and enjoy every session.
 
 **Roles and Social Frames:**
@@ -316,27 +398,24 @@ I maintain a friendly and approachable tone, using positive and encouraging lang
 
 Together, we will create memorable gaming moments, achieve your gaming aspirations, and ensure that every session is both fun and rewarding.
 """
-                }
-            ],
-            "role": "model"
-        }
-
+                    }
+                ],
+                "role": "model"
+            }
 
         setup_msg = {
             "setup": {
                 "model": f"models/{MODEL}",
-                "generation_config":
-                    {
-                    "speech_config":
-                        {
-                            "voice_config": {
-                        "prebuilt_voice_config": {
-                            "voice_name": os.getenv("VOICE_NAME")
+                "generation_config": {
+                    "speech_config": {
+                        "voice_config": {
+                            "prebuilt_voice_config": {
+                                "voice_name": os.getenv("VOICE_NAME")
+                            }
                         }
-                    }
-                        },
-                    "temperature": 0,
                     },
+                    "temperature": 0,
+                },
                 "system_instruction": msg,
                 "tools": tools
             }
@@ -350,22 +429,47 @@ Together, we will create memorable gaming moments, achieve your gaming aspiratio
         """Handle user text input and send to the model."""
         while True:
             text = await asyncio.to_thread(input, "You: ")
+            text = text.strip()
+            if not text:
+                continue
+
             if text.lower() == "q":
                 # When user quits, generate final report
                 await self.generate_final_report()
                 await self.ws.close()
                 break
-            self.global_context.add_message("user", text)
 
-            # Generate a concise summary of recent analysis
-            if self.global_context.frame_analysis_results:
-                latest_analysis = self.global_context.frame_analysis_results[-1]
-                analysis_summary = f"Recent analysis: {json.dumps(latest_analysis, indent=2)}"
+            elif text.lower() == "describe the screen":
+                if not self.global_context.is_describing:
+                    self.global_context.is_describing = True
+                    logging.info("Continuous description mode enabled.")
+                    await self.send_description("Starting continuous screen descriptions.")
+                else:
+                    logging.info("Continuous description mode is already active.")
+                    await self.send_description("Continuous screen descriptions are already active.")
+
+            elif text.lower() == "stop describing":
+                if self.global_context.is_describing:
+                    self.global_context.is_describing = False
+                    logging.info("Continuous description mode disabled.")
+                    await self.send_description("Stopping continuous screen descriptions.")
+                else:
+                    logging.info("Continuous description mode is not active.")
+                    await self.send_description("Continuous screen descriptions are not active.")
+
             else:
-                analysis_summary = "No recent analysis available."
+                # Regular user message
+                self.global_context.add_message("user", text)
 
-            # Craft the prompt with analysis summary and user message
-            prompt = f"""
+                # Generate a concise summary of recent analysis
+                if self.global_context.frame_analysis_results:
+                    latest_analysis = self.global_context.frame_analysis_results[-1]
+                    analysis_summary = f"Recent analysis: {json.dumps(latest_analysis, indent=2)}"
+                else:
+                    analysis_summary = "No recent analysis available."
+
+                # Craft the prompt with analysis summary and user message
+                prompt = f"""
 You are a friendly gaming assistant helping me improve my gameplay in '{self.global_context.game}'.
 Based on the current situation on the screen and your analysis of my recent gameplay, provide me with strategic advice and feedback.
 
@@ -374,14 +478,14 @@ Based on the current situation on the screen and your analysis of my recent game
 User: {text}
 Assistant:
 """
-            msg = {
-                "client_content": {
-                    "turn_complete": True,
-                    "turns": [{"role": "user", "parts": [{"text": prompt}]}],
+                msg = {
+                    "client_content": {
+                        "turn_complete": True,
+                        "turns": [{"role": "user", "parts": [{"text": prompt}]}],
+                    }
                 }
-            }
-            await self.ws.send(json.dumps(msg))
-            logging.info("Message sent to assistant.")
+                await self.ws.send(json.dumps(msg))
+                logging.info("Message sent to assistant.")
 
     def _capture_screen_frame(self) -> str:
         """Capture a single screen frame and return it as a base64-encoded JPEG."""
@@ -441,17 +545,15 @@ Assistant:
             analysis = await asyncio.to_thread(analyze_frame, len(self.collected_frames), recent_frames, context)
             # Update global context
             if analysis.get("new_notes"):
-                self.global_context.notes.append(analysis["new_notes"])
-            self.global_context.frame_analysis_results.append(analysis)
+                self.global_context.add_note(analysis["new_notes"])
+            self.global_context.add_frame_analysis_result(analysis)
             logging.info(f"Frame analysis added for frames {analysis['timestamp_id']}.")
 
-            # **New Code to Save Analysis to Data Folder**
-            # Ensure the 'data' directory exists
-            os.makedirs("data", exist_ok=True)
+            # Save analysis to Data Folder
             os.makedirs("data/analysis_reports", exist_ok=True)
 
             # Define the filename with timestamp to avoid overwriting
-            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             analysis_filename = f"data/analysis_reports/frame_analysis_{timestamp}.json"
 
             # Save the analysis_result to the JSON file
@@ -461,6 +563,20 @@ Assistant:
                 logging.info(f"Frame analysis saved to '{analysis_filename}'.")
             except Exception as e:
                 logging.error(f"Failed to save frame analysis: {e}")
+
+            # If continuous description mode is active, send the description
+            if self.global_context.is_describing:
+                description = self.generate_description(analysis)
+                await self.send_description(description)
+
+    def generate_description(self, analysis: dict) -> str:
+        """Generate a descriptive text from the analysis result."""
+        description = f"Frame Analysis [{analysis['timestamp_id']}]:\n"
+        description += f"Tricks Used: {', '.join(analysis.get('tricks_used', []))}\n"
+        description += f"Good Actions: {', '.join(analysis.get('good_actions', []))}\n"
+        description += f"Bad Actions: {', '.join(analysis.get('bad_actions', []))}\n"
+        description += f"Recommendations: {', '.join(analysis.get('recommendations', []))}\n"
+        return description
 
     @traceable
     async def listen_audio(self):
@@ -582,11 +698,10 @@ Assistant:
         end_report = await asyncio.to_thread(generate_end_report, summary)
         logging.info("\n--- Final Summarized Report ---")
         print(end_report)
-        os.makedirs("data", exist_ok=True)
         os.makedirs("data/summary_reports", exist_ok=True)
         with open("data/summary_reports/end_report.txt", "w") as f:
             f.write(end_report)
-        logging.info("Final report saved to 'data/end_report.txt'.")
+        logging.info("Final report saved to 'data/summary_reports/end_report.txt'.")
 
     @traceable
     def handle_server_content(self, server_content):
@@ -622,76 +737,124 @@ Assistant:
         task_group.create_task(self.periodic_context_update())
 
     @traceable
-    async def run(self):
+    async def restart_agent(self):
+        """Restart the agent while preserving the state."""
+        logging.info("Restarting the agent with saved context.")
+        self.global_context.save_to_file()  # Save context to a file
+        await asyncio.sleep(1)  # Short delay before restarting
+        await self.run(initial_restart=True)  # Restart the agent process with initial_restart flag
+
+    @traceable
+    async def handle_error(self, error):
+        """Handle the error and attempt to restart."""
+        logging.error(f"An error occurred: {error}", exc_info=True)
+        self.global_context.save_to_file()  # Save context before restarting
+        await self.restart_agent()
+
+    @traceable
+    async def run(self, initial_restart=False):
         """Run the agent by establishing WebSocket connection and starting tasks."""
-        try:
-            async with connect(URI, additional_headers={"Content-Type": "application/json"}) as ws, asyncio.TaskGroup() as tg:
-                self.ws = ws
-                tools_custom = [
-                    {
-                        "name": "save_user_preferences",
-                        "description": "Saves user preferences to a file."
-                    },
-                    {
-                        "name": "remember_user_preferences",
-                        "description": "Store user preferences in memory.",
-                        "parameters": {
-                            "type": "object",
-                            "properties": {
-                                "key": {
-                                    "type": "string",
-                                    "description": "Preference name."
-                                },
-                                "value": {
-                                    "type": "string",
-                                    "description": "Preference value."
-                                }
-                            },
-                            "required": ["key", "value"]
-                        }
-                    },
-                    {
-                        "name": "perform_game_detection",
-                        "description": "Detect the game and key focus points from provided frames.",
-                        "parameters": {
-                            "type": "object",
-                            "properties": {
-                                "frames": {
-                                    "type": "array",
-                                    "items": {
+        while True:
+            try:
+                async with connect(URI, additional_headers={"Content-Type": "application/json"}) as ws, asyncio.TaskGroup() as tg:
+                    self.ws = ws
+                    tools_custom = [
+                        {
+                            "name": "save_user_preferences",
+                            "description": "Saves user preferences to a file."
+                        },
+                        {
+                            "name": "remember_user_preferences",
+                            "description": "Store user preferences in memory.",
+                            "parameters": {
+                                "type": "object",
+                                "properties": {
+                                    "key": {
                                         "type": "string",
-                                        "description": "Base64-encoded image frames."
+                                        "description": "Preference name."
                                     },
-                                    "description": "List of base64-encoded image frames for game detection."
-                                }
-                            },
-                            "required": ["frames"]
+                                    "value": {
+                                        "type": "string",
+                                        "description": "Preference value."
+                                    }
+                                },
+                                "required": ["key", "value"]
+                            }
+                        },
+                        {
+                            "name": "perform_game_detection",
+                            "description": "Detect the game and key focus points from provided frames.",
+                            "parameters": {
+                                "type": "object",
+                                "properties": {
+                                    "frames": {
+                                        "type": "array",
+                                        "items": {
+                                            "type": "string",
+                                            "description": "Base64-encoded image frames."
+                                        },
+                                        "description": "List of base64-encoded image frames for game detection."
+                                    }
+                                },
+                                "required": ["frames"]
+                            }
                         }
-                    }
-                ]
-                await self.startup(tools=[{'function_declarations': tools_custom}])
+                    ]
+                    await self.startup(tools=[{'function_declarations': tools_custom}], is_restart=initial_restart)
 
-                self.audio_in_queue = asyncio.Queue()
-                self.out_queue = asyncio.Queue(maxsize=10)
+                    self.audio_in_queue = asyncio.Queue()
+                    self.out_queue = asyncio.Queue(maxsize=10)
 
-                # Start concurrent tasks
-                tg.create_task(self.send_realtime())
-                tg.create_task(self.listen_audio())
-                tg.create_task(self.stream_screen_frames())
-                tg.create_task(self.receive_audio())
-                tg.create_task(self.play_audio())
-                tg.create_task(self.send_text())
-                tg.create_task(self.run_background_tasks(tg))
+                    # Start concurrent tasks
+                    tg.create_task(self.send_realtime())
+                    tg.create_task(self.listen_audio())
+                    tg.create_task(self.stream_screen_frames())
+                    tg.create_task(self.receive_audio())
+                    tg.create_task(self.play_audio())
+                    tg.create_task(self.send_text())
+                    tg.create_task(self.run_background_tasks(tg))
 
-                # The 'async with' block will automatically wait for all tasks in the TaskGroup to finish
-                # No need to call 'tg.wait_closed()'
+                    # If this is a restart, send the continuation prompt
+                    if initial_restart:
+                        await self.continue_conversation()
 
-        except asyncio.CancelledError:
-            logging.info("Agent shutdown requested.")
-        except Exception as e:
-            logging.error("An error occurred:", exc_info=True)
-            if self.audio_stream:
-                self.audio_stream.close()
+                    # The 'async with' block will automatically wait for all tasks in the TaskGroup to finish
+                    # No need to call 'tg.wait_closed()'
+
+            except asyncio.CancelledError:
+                logging.info("Agent shutdown requested.")
+                break
+            except Exception as e:
+                await self.handle_error(e)
+                break
+
+    @traceable
+    async def send_description(self, description: str):
+        """Send a description message to the user."""
+        msg = {
+            "client_content": {
+                "turn_complete": True,
+                "turns": [{"role": "assistant", "parts": [{"text": description}]}],
+            }
+        }
+        await self.ws.send(json.dumps(msg))
+        logging.info("Description sent to user.")
+
+    @traceable
+    async def continue_conversation(self):
+        """Send a continuation prompt to the assistant to resume the conversation."""
+        last_messages = self.global_context.get_history(last_n=5)
+        formatted_messages = "\n".join([f"{msg['role'].capitalize()}: {msg['text']}" for msg in last_messages])
+        continuation_prompt = f"Continue, here is the past discussion:\n{formatted_messages}\nDon't say 'ok I continue', just continue."
+
+        msg = {
+            "client_content": {
+                "turn_complete": True,
+                "turns": [{"role": "user", "parts": [{"text": continuation_prompt}]}],
+            }
+        }
+        await self.ws.send(json.dumps(msg))
+        logging.info("Continuation prompt sent to assistant.")
 
 # -----------------------------
 # Main Execution
@@ -703,3 +866,4 @@ if __name__ == "__main__":
         asyncio.run(agent.run())
     except KeyboardInterrupt:
         logging.info("Agent terminated by user.")
+        global_context.save_to_file()  # Save context upon graceful shutdown
