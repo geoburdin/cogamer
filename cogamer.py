@@ -798,6 +798,13 @@ Assistant:
                                 },
                                 "required": ["frames"]
                             }
+                        },
+                        {
+                            "name": "google_search_retrieval",
+                            "parameters": {
+                                "dynamic_retrieval_mode": "dynamic",
+                                "threshold": 0.5
+                            }
                         }
                     ]
                     await self.startup(tools=[{'function_declarations': tools_custom}], is_restart=initial_restart)
