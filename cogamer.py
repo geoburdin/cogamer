@@ -5,9 +5,6 @@ import base64
 import json
 import io
 import os
-import sys
-import traceback
-import random
 import pyaudio
 import PIL.Image
 import mss
