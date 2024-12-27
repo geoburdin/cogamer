@@ -669,7 +669,8 @@ Assistant:
                         }
                     }
                 ]
-                await self.startup(tools=[{'function_declarations': tools_custom}])
+                await self.startup(tools=[{'function_declarations': tools_custom},
+                                   {'google_search': {}}])
 
                 self.audio_in_queue = asyncio.Queue()
                 self.out_queue = asyncio.Queue(maxsize=10)
