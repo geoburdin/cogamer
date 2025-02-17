@@ -25,7 +25,7 @@ class ChooseLanguageWindow:
                                              command=self.select)
             self.voice_btn.pack(**position)
 
-        btn_ok = ttk.Button(text="OK", command=lambda: self.start_cogamer(root=self.root, voice=self.basic_voice.get()))
+        btn_ok = ttk.Button(text="OK", command=lambda: self.start_cogamer(voice=self.basic_voice.get()))
         btn_ok.place(relx=0.4, rely=0.85)
         btn_exit = ttk.Button(text="Exit", command=lambda: self.exit_from_app(root=self.root))
         btn_exit.place(relx=0.7, rely=0.85)
@@ -40,8 +40,10 @@ class ChooseLanguageWindow:
         root.destroy()  # closed window and app
         print("App has been closed")
 
-    def start_cogamer(self, root, voice='Fenrir'):
-        root.destroy()
+    def start_cogamer(self, voice='Fenrir'):
+        self.root.destroy()
+        self.root.quit()
+        tk._default_root = None
         print(f"Voice {voice} has chosen")
         cogamer(chosen_voice=voice)
 
