@@ -20,6 +20,7 @@ from typing import List, Dict
 from langchain_openai import ChatOpenAI
 from schemas import FrameAnalysis, Context, DetectGameFocusPoints
 from langchain_core.messages import HumanMessage
+from concurrent.futures import ThreadPoolExecutor
 
 # -----------------------------
 # Configuration
@@ -50,6 +51,11 @@ structured_llm_detect_game_focus_points = model.with_structured_output(DetectGam
 # -----------------------------
 # Global Context Class
 # -----------------------------
+
+async def ainput(prompt: str = "") -> str:
+    with ThreadPoolExecutor(1, "AsyncInput") as executor:
+        return await asyncio.get_event_loop().run_in_executor(executor, input, prompt)
+
 
 class GlobalContext:
     def __init__(self):
@@ -347,7 +353,8 @@ Together, we will create memorable gaming moments, achieve your gaming aspiratio
     async def send_text(self):
         """Handle user text input and send to the model."""
         while True:
-            text = await asyncio.to_thread(input, "You: ")
+            text = await ainput("You: ")
+            # text = await asyncio.to_thread(input, "You: ")
             if text.lower() == "q":
                 # When user quits, generate final report
                 await self.generate_final_report()

@@ -1,6 +1,6 @@
 import tkinter as tk
 from tkinter import ttk
-from cogamer import cogamer
+from main import global_voice
 
 
 class ChooseLanguageWindow:
@@ -37,16 +37,18 @@ class ChooseLanguageWindow:
         self.label2.config(text=f"Choose a copilot voice. Now '{self.basic_voice.get()}' has chosen")
 
     def exit_from_app(self, root):
-        root.destroy()  # closed window and app
+        self.root.destroy()
+        self.root.quit()
+        tk._default_root = None
+        # closed window and app
         print("App has been closed")
 
     def start_cogamer(self, voice='Fenrir'):
         self.root.destroy()
         self.root.quit()
-        tk._default_root = None
         print(f"Voice {voice} has chosen")
-        cogamer(chosen_voice=voice)
-
+        # cogamer(chosen_voice=voice)
+        global_voice()
 
 if __name__ == "__main__":
     choose_language_window = ChooseLanguageWindow()
