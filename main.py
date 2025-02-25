@@ -49,6 +49,7 @@ class ChooseLanguageWindow:
     def start_cogamer(self, voice='Fenrir'):
         self.root.destroy()
         self.root.quit()
+        tk._default_root = None
         print(f"Voice {voice} has chosen")
         self.do_start_cogamer = True
 
