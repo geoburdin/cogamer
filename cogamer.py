@@ -262,7 +262,7 @@ async def handle_tool_call(ws, tool_call):
 # -----------------------------
 
 class Agent:
-    def __init__(self, global_context: GlobalContext):
+    def __init__(self, global_context: GlobalContext, chosen_voice: str ="Fenrir"):
         self.global_context = global_context
         self.ws = None
         self.audio_in_queue = None
@@ -270,6 +270,7 @@ class Agent:
         self.audio_stream = None
         self.collected_frames = []  # Store raw frames as base64 for analysis
         self.frame_counter = 0
+        self.chosen_voice = chosen_voice
 
     @traceable
     async def startup(self, tools):
@@ -328,7 +329,7 @@ Together, we will create memorable gaming moments, achieve your gaming aspiratio
                         {
                             "voice_config": {
                         "prebuilt_voice_config": {
-                            "voice_name": os.getenv("VOICE_NAME")
+                            "voice_name": self.chosen_voice #os.getenv("VOICE_NAME")
                         }
                     }
                         },
@@ -691,12 +692,19 @@ Assistant:
             if self.audio_stream:
                 self.audio_stream.close()
 
+def cogamer(chosen_voice="Fenrir"):
+    agent = Agent(global_context=global_context, chosen_voice=chosen_voice)
+    try:
+        asyncio.run(agent.run())
+    except KeyboardInterrupt:
+        logging.info("Agent terminated by user.")
+
 # -----------------------------
 # Main Execution
 # -----------------------------
 
 if __name__ == "__main__":
-    agent = Agent(global_context=global_context)
+    agent = Agent(global_context=global_context, chosen_voice="Fenrir")
     try:
         asyncio.run(agent.run())
     except KeyboardInterrupt:
