@@ -1,22 +1,11 @@
-"""
-## Documentation
-Quickstart: https://github.com/google-gemini/cookbook/blob/main/quickstarts/Get_started_LiveAPI.py
-
-## Setup
-
-To install the dependencies for this script, run:
-
-```
-pip install google-genai opencv-python pyaudio pillow mss
-```
-"""
+import faulthandler; faulthandler.enable()
 
 import os
 import asyncio
 import base64
 import io
 import traceback
-
+import audioop
 import cv2
 import pyaudio
 import PIL.Image
@@ -31,27 +20,49 @@ from google.genai.types import RealtimeInputConfig, AutomaticActivityDetection
 
 dotenv.load_dotenv()
 FORMAT = pyaudio.paInt16
-CHANNELS = 1
-SEND_SAMPLE_RATE = 16000
-RECEIVE_SAMPLE_RATE = 24000
-CHUNK_SIZE = 256
+SEND_RATE     = 16000   # for Gemini
+MIC_CHANNELS  = 1
+pya = pyaudio.PyAudio()
 
+# detect native rates dynamically
+input_info  = pya.get_default_input_device_info()
+output_info = pya.get_default_output_device_info()
+
+NATIVE_RATE  = int(input_info['defaultSampleRate'])
+RECEIVE_RATE = 24000
+
+# pick a ~40 ms chunk size
+CHUNK_NATIVE = int(NATIVE_RATE * 0.04)
 MODEL = "models/gemini-2.0-flash-live-001"
 
 DEFAULT_MODE = "screen"
 
 client = genai.Client(
-    http_options={"api_version": "v1beta"},
     api_key=os.environ.get("GEMINI_API_KEY"),
 )
 
 tools = [
-    types.Tool(code_execution=types.ToolCodeExecution),
+    types.Tool(code_execution=types.ToolCodeExecution()),
     types.Tool(google_search=types.GoogleSearch()),
     types.Tool(
-        function_declarations=[
-        ]
-    ),
+      function_declarations=[
+        types.FunctionDeclaration(
+          name="click_on",
+          description="Move the mouse to given (x,y) and click",
+          parameters={
+            "type": "object",
+            "properties": {
+              "x":   {"type": "number"},
+              "y":   {"type": "number"},
+              "clicks":   {"type": "integer", "default": 1},
+              "interval": {"type": "number",  "default": 0.0},
+              "button":   {"type": "string",  "default": "left"}
+            },
+            "required": ["x","y"]
+          }
+        )
+      ]
+    )
 ]
 
 CONFIG = types.LiveConnectConfig(
@@ -65,7 +76,7 @@ CONFIG = types.LiveConnectConfig(
     ),
     tools=tools,
     system_instruction=types.Content(
-        parts=[types.Part.from_text(text="You are professional Games QA Engineer, and there is a stream being sent to you in form of the separate frames")],
+        parts=[types.Part.from_text(text="You are professional Games QA Engineer, and there is a stream being sent to you in form of the separate frames. ANSWER ONLY short, dont be talkative")],
         role="user"
     ),
     context_window_compression=types.ContextWindowCompressionConfig(
@@ -80,7 +91,7 @@ CONFIG = types.LiveConnectConfig(
             disabled= False,
             start_of_speech_sensitivity = types.StartSensitivity.START_SENSITIVITY_HIGH,
             end_of_speech_sensitivity = types.EndSensitivity.END_SENSITIVITY_LOW,
-            prefix_padding_ms = 5,
+            prefix_padding_ms = 25,
             silence_duration_ms = 100)
     )
 )
@@ -109,7 +120,7 @@ class AudioLoop:
             )
             if text.lower() == "q":
                 break
-            await self.session.send_realtime_input(text=text or ".", end_of_turn=True)
+            await self.session.send(input=text or ".", end_of_turn=True)
 
     def _get_frame(self, cap):
         # Read the frameq
@@ -188,23 +199,32 @@ class AudioLoop:
                 await self.session.send_realtime_input(video=msg)
 
     async def listen_audio(self):
-        mic_info = pya.get_default_input_device_info()
-        self.audio_stream = await asyncio.to_thread(
+        mic = await asyncio.to_thread(
             pya.open,
             format=FORMAT,
-            channels=CHANNELS,
-            rate=SEND_SAMPLE_RATE,
+            channels=MIC_CHANNELS,
+            rate=NATIVE_RATE,  # dynamic native rate
             input=True,
-            input_device_index=mic_info["index"],
-            frames_per_buffer=CHUNK_SIZE,
+            frames_per_buffer=CHUNK_NATIVE,
         )
-        if __debug__:
-            kwargs = {"exception_on_overflow": False}
-        else:
-            kwargs = {}
         while True:
-            data = await asyncio.to_thread(self.audio_stream.read, CHUNK_SIZE, **kwargs)
-            await self.out_queue.put({"data": data, "mime_type": "audio/pcm"})
+            native = await asyncio.to_thread(
+                mic.read,
+                CHUNK_NATIVE,
+                exception_on_overflow=False
+            )
+            pcm16k, _ = audioop.ratecv(  # down-sample once per 43 ms block
+                native,  # bytes
+                2,  # 2 bytes per sample (Int16)
+                MIC_CHANNELS,
+                NATIVE_RATE,
+                SEND_RATE,
+                None
+            )
+            await self.out_queue.put({
+                "data": pcm16k,
+                "mime_type": "audio/pcm"
+            })
 
     async def receive_audio(self):
         "Background task to reads from the websocket and write pcm chunks to the output queue"
@@ -220,47 +240,64 @@ class AudioLoop:
                 self.audio_in_queue.get_nowait()
 
     async def play_audio(self):
-        stream = await asyncio.to_thread(
+        spk = await asyncio.to_thread(
             pya.open,
             format=FORMAT,
             channels=1,
-            rate=RECEIVE_SAMPLE_RATE,
+            rate=NATIVE_RATE,  # dynamic native rate
             output=True,
         )
         while True:
-            bytestream = await self.audio_in_queue.get()
-            await asyncio.to_thread(stream.write, bytestream)
+            pcm24 = await self.audio_in_queue.get()
+            # convert from 24k → native
+            pcm_native, _ = audioop.ratecv(
+                pcm24, 2, 1,
+                RECEIVE_RATE, NATIVE_RATE,
+                None
+            )
+            await asyncio.to_thread(spk.write, pcm_native)
 
     async def run(self):
-        try:
-            async with (
-                client.aio.live.connect(model=MODEL, config=CONFIG) as session,
-                asyncio.TaskGroup() as tg,
-            ):
-                self.session = session
+        while True:
+            try:
+                async with (
+                    client.aio.live.connect(model=MODEL, config=CONFIG) as session,
+                    asyncio.TaskGroup() as tg,
+                ):
+                    self.session = session
 
-                self.audio_in_queue = asyncio.Queue()
-                self.out_queue = asyncio.Queue(maxsize=5)
+                    self.audio_in_queue = asyncio.Queue()
+                    self.out_queue = asyncio.Queue(maxsize=5)
 
-                send_text_task = tg.create_task(self.send_text())
-                tg.create_task(self.send_realtime())
-                tg.create_task(self.listen_audio())
-                if self.video_mode == "camera":
-                    tg.create_task(self.get_frames())
-                elif self.video_mode == "screen":
-                    tg.create_task(self.get_screen())
+                    send_text_task = tg.create_task(self.send_text())
+                    tg.create_task(self.send_realtime())
+                    tg.create_task(self.listen_audio())
+                    if self.video_mode == "camera":
+                        tg.create_task(self.get_frames())
+                    elif self.video_mode == "screen":
+                        tg.create_task(self.get_screen())
 
-                tg.create_task(self.receive_audio())
-                tg.create_task(self.play_audio())
+                    tg.create_task(self.receive_audio())
+                    tg.create_task(self.play_audio())
 
-                await send_text_task
-                raise asyncio.CancelledError("User requested exit")
+                    await send_text_task
+                    raise asyncio.CancelledError("User requested exit")
 
-        except asyncio.CancelledError:
-            pass
-        except ExceptionGroup as EG:
-            self.audio_stream.close()
-            traceback.print_exception(EG)
+            except Exception as e:
+                if hasattr(self, "audio_stream") and self.audio_stream.is_active():
+                    self.audio_stream.stop_stream()
+                self.audio_stream.close()
+                print(f"[run] session crashed: {e}\n")
+                await asyncio.sleep(2)
+                continue
+
+import pyautogui
+def click_on(x, y, clicks=1, interval=0.0, button='left'):
+    """
+    Moves the mouse to (x,y) and clicks.
+    """
+    pyautogui.moveTo(x, y)
+    pyautogui.click(clicks=clicks, interval=interval, button=button)
 
 
 if __name__ == "__main__":
