@@ -16,14 +16,13 @@ import argparse
 from google import genai
 from google.genai import types
 import dotenv
-from google.genai.types import RealtimeInputConfig, AutomaticActivityDetection
+from google.genai.types import RealtimeInputConfig, AutomaticActivityDetection, AudioTranscriptionConfig
 
 dotenv.load_dotenv()
 FORMAT = pyaudio.paInt16
 SEND_RATE     = 16000   # for Gemini
 MIC_CHANNELS  = 1
 pya = pyaudio.PyAudio()
-
 # detect native rates dynamically
 input_info  = pya.get_default_input_device_info()
 output_info = pya.get_default_output_device_info()
@@ -65,37 +64,6 @@ tools = [
     )
 ]
 
-CONFIG = types.LiveConnectConfig(
-    response_modalities=[
-        "AUDIO",
-    ],
-    speech_config=types.SpeechConfig(
-        voice_config=types.VoiceConfig(
-            prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name="Zephyr")
-        )
-    ),
-    tools=tools,
-    system_instruction=types.Content(
-        parts=[types.Part.from_text(text="You are professional Games QA Engineer, and there is a stream being sent to you in form of the separate frames. ANSWER ONLY short, dont be talkative")],
-        role="user"
-    ),
-    context_window_compression=types.ContextWindowCompressionConfig(
-        # When the total context reaches ~20 000 tokens, compress the oldest turns
-        trigger_tokens=20_000,
-        sliding_window=types.SlidingWindow(
-            # After compression, keep the most recent 10 000 tokens uncompressed
-            target_tokens=10_000
-        )
-    ),
-    realtime_input_config = RealtimeInputConfig(automatic_activity_detection =  AutomaticActivityDetection(
-            disabled= False,
-            start_of_speech_sensitivity = types.StartSensitivity.START_SENSITIVITY_HIGH,
-            end_of_speech_sensitivity = types.EndSensitivity.END_SENSITIVITY_LOW,
-            prefix_padding_ms = 25,
-            silence_duration_ms = 100)
-    )
-)
-
 pya = pyaudio.PyAudio()
 
 
@@ -111,6 +79,7 @@ class AudioLoop:
         self.send_text_task = None
         self.receive_audio_task = None
         self.play_audio_task = None
+        self.handle = None
 
     async def send_text(self):
         while True:
@@ -231,6 +200,10 @@ class AudioLoop:
         while True:
             turn = self.session.receive()
             async for response in turn:
+                if getattr(response, "session_resumption_update", None):
+                    upd = response.session_resumption_update
+                    if upd.resumable and upd.new_handle:
+                        self.handle = upd.new_handle
                 if data := response.data:
                     self.audio_in_queue.put_nowait(data)
                     continue
@@ -244,7 +217,7 @@ class AudioLoop:
             pya.open,
             format=FORMAT,
             channels=1,
-            rate=NATIVE_RATE,  # dynamic native rate
+            rate=NATIVE_RATE,
             output=True,
         )
         while True:
@@ -260,12 +233,41 @@ class AudioLoop:
     async def run(self):
         while True:
             try:
+                CONFIG = types.LiveConnectConfig(
+                    response_modalities=[
+                        "AUDIO",
+                    ],
+                    temperature=0.0,
+                    speech_config=types.SpeechConfig(
+                        voice_config=types.VoiceConfig(
+                            prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name="Zephyr")
+                        )
+                    ),
+                    tools=tools,
+                    system_instruction=types.Content(
+                        parts=[types.Part.from_text(
+                            text="You are professional Games QA Engineer, and there is a stream being sent to you in form of the separate frames. ANSWER ONLY short, dont be talkative. Usually user asks you only about the current state of the screen, so the last frame")],
+                        role="user"
+                    ),
+                    session_resumption=types.SessionResumptionConfig(
+                        # The handle of the session to resume is passed here,
+                        # or else None to start a new session.
+                        handle=self.handle,
+                    ),
+                    context_window_compression=types.ContextWindowCompressionConfig(sliding_window=types.SlidingWindow()),
+                    realtime_input_config=RealtimeInputConfig(automatic_activity_detection=AutomaticActivityDetection(
+                        disabled=False,
+                        start_of_speech_sensitivity=types.StartSensitivity.START_SENSITIVITY_HIGH,
+                        end_of_speech_sensitivity=types.EndSensitivity.END_SENSITIVITY_LOW,
+                        prefix_padding_ms=25,
+                        silence_duration_ms=1000)
+                    )
+                )
                 async with (
                     client.aio.live.connect(model=MODEL, config=CONFIG) as session,
                     asyncio.TaskGroup() as tg,
                 ):
                     self.session = session
-
                     self.audio_in_queue = asyncio.Queue()
                     self.out_queue = asyncio.Queue(maxsize=5)
 
@@ -284,11 +286,7 @@ class AudioLoop:
                     raise asyncio.CancelledError("User requested exit")
 
             except Exception as e:
-                if hasattr(self, "audio_stream") and self.audio_stream.is_active():
-                    self.audio_stream.stop_stream()
-                self.audio_stream.close()
                 print(f"[run] session crashed: {e}\n")
-                await asyncio.sleep(2)
                 continue
 
 import pyautogui
