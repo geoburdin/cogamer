@@ -3,7 +3,14 @@ from tkinter import ttk
 import subprocess
 import sys
 import os
+import sys, os, subprocess, tkinter as tk
+from tkinter import ttk
 
+# ---------- helper that works frozen / unfrozen ----------
+def resource_path(rel_path: str) -> str:
+    """Return absolute path to resource inside bundle or next to script"""
+    base = getattr(sys, "_MEIPASS", os.path.dirname(__file__))  # _MEIPASS exists only when frozen
+    return os.path.join(base, rel_path)
 
 class ChooseLanguageWindow:
     def __init__(self):
@@ -73,11 +80,18 @@ class ChooseLanguageWindow:
 
     def start_cogamer(self):
         if self.cogamer_process and self.cogamer_process.poll() is None:
-            print("Cogamer is already running.")
-            self.cogamer_process.kill()
+            print("Cogamer is already running, stopping it first...")
+            self.cogamer_process.terminate()
+        # Where is the executable?
+        if getattr(sys, "frozen", False):             # running inside PyInstaller bundle
+            cogamer_exe = resource_path("cogamer")    # we’ll embed it with --add-binary
+            cmd = [cogamer_exe]
+        else:                                         # dev mode
+            cogamer_exe = os.path.join(os.path.dirname(__file__), "cogamer.py")
+            cmd = [sys.executable, cogamer_exe]
+
         chosen_voice = self.basic_voice.get()
-        print(f"Voice {chosen_voice} has chosen. Starting cogamer.py...")
-        self.cogamer_process = subprocess.Popen([sys.executable, "cogamer.py", chosen_voice])
+        self.cogamer_process = subprocess.Popen(cmd + [chosen_voice])
 
 
 if __name__ == "__main__":

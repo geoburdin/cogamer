@@ -18,7 +18,11 @@ from google.genai import types
 import dotenv
 from google.genai.types import RealtimeInputConfig, AutomaticActivityDetection, AudioTranscriptionConfig
 
-dotenv.load_dotenv()
+import sys, os, dotenv, pathlib
+
+# look for .env inside the bundle as well as cwd
+bundle_base = pathlib.Path(getattr(sys, "_MEIPASS", pathlib.Path.cwd()))
+dotenv.load_dotenv(bundle_base / ".env")
 FORMAT = pyaudio.paInt16
 SEND_RATE     = 16000   # for Gemini
 MIC_CHANNELS  = 1
