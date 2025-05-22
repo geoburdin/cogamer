@@ -30,7 +30,7 @@ CHUNK_SIZE = 512
 
 # Model and API settings
 HOST = "generativelanguage.googleapis.com"
-MODEL = "gemini-2.0-flash-exp"
+MODEL = "models/gemini-2.0-flash-live-001"
 API_KEY = os.environ.get("GEMINI_API_KEY")
 URI = f"wss://{HOST}/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent?key={API_KEY}"
 
