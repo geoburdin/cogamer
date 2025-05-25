@@ -15,7 +15,6 @@ def resource_path(rel_path: str) -> str:
 class ChooseLanguageWindow:
     def __init__(self):
         self.root = tk.Tk()
-        self.root.geometry("250x400")
         self.root.resizable(height=False, width=False)
         self.root.title("Copilot Gamer")
         icon_path = os.path.join(os.path.dirname(__file__), "copilot.png")
@@ -23,15 +22,38 @@ class ChooseLanguageWindow:
 
         self.cogamer_process = None  # To store the subprocess reference
 
+        # Pre-built Gemini TTS voices (speech-generation guide, May 2025)
         self.voices = {
-            "Puck": "Puck",
-            "Charon": "Charon",
-            "Kore": "Kore",
-            "Fenrir": "Fenrir",
-            "Aoede": "Aoede",
-            "Leda": "Leda",
-            "Orus": "Orus",
-            "Zephyr": "Zephyr"
+            "Zephyr": "Zephyr",  # bright
+            "Puck": "Puck",  # upbeat
+            "Charon": "Charon",  # informative
+            "Kore": "Kore",  # firm
+            "Fenrir": "Fenrir",  # excitable
+            "Leda": "Leda",  # youthful
+            "Orus": "Orus",  # firm
+            "Aoede": "Aoede",  # breezy
+            "Callirhoe": "Callirhoe",  # easy-going
+            "Autonoe": "Autonoe",  # bright
+            "Enceladus": "Enceladus",  # breathy
+            "Iapetus": "Iapetus",  # clear
+            "Umbriel": "Umbriel",  # easy-going
+            "Algieba": "Algieba",  # smooth
+            "Despina": "Despina",  # smooth
+            "Erinome": "Erinome",  # clear
+            "Algenib": "Algenib",  # gravelly
+            "Rasalgethi": "Rasalgethi",  # informative
+            "Laomedeia": "Laomedeia",  # upbeat
+            "Achernar": "Achernar",  # soft
+            "Alnilam": "Alnilam",  # firm
+            "Schedar": "Schedar",  # even
+            "Gacrux": "Gacrux",  # mature
+            "Pulcherrima": "Pulcherrima",  # forward
+            "Achird": "Achird",  # friendly
+            "Zubenelgenubi": "Zubenelgenubi",  # casual
+            "Vindemiatrix": "Vindemiatrix",  # gentle
+            "Sadachbia": "Sadachbia",  # lively
+            "Sadaltager": "Sadaltager",  # knowledgeable
+            "Sulafar": "Sulafar",  # warm
         }
         self.basic_voice = tk.StringVar(value=self.voices["Zephyr"])
 
@@ -40,15 +62,24 @@ class ChooseLanguageWindow:
         self.label2 = ttk.Label(self.root, text=f"Choose a copilot voice")
         self.label2.pack(padx=10, pady=6, anchor='w')
 
-        for voice in self.voices.keys():
-            btn = ttk.Radiobutton(
-                self.root,
-                text=self.voices[voice],
-                value=self.voices[voice],
+
+        COLS = 3                               # how many columns you want
+        voice_frame = ttk.Frame(self.root)
+        voice_frame.pack(padx=10, pady=6, fill="x")
+
+        for idx, voice in enumerate(self.voices):
+            r = idx // COLS                    # row index
+            c = idx %  COLS                    # column index
+            ttk.Radiobutton(
+                voice_frame,
+                text=voice,
+                value=voice,
                 variable=self.basic_voice,
                 command=self.select
-            )
-            btn.pack(padx=20, pady=6, anchor='w')
+            ).grid(row=r, column=c, sticky="w", padx=5, pady=3)
+
+        # optional: widen the window a bit
+        self.root.geometry("340x400")
 
         btn_ok = ttk.Button(self.root, text="OK", command=self.start_cogamer)
         btn_ok.place(relx=0, rely=0.85)

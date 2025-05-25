@@ -1,53 +1,48 @@
-import faulthandler; faulthandler.enable()
+"""
+## Documentation
+Quickstart: https://github.com/google-gemini/cookbook/blob/main/quickstarts/Get_started_LiveAPI.py
+
+## Setup
+
+To install the dependencies for this script, run:
+
+```
+pip install google-genai opencv-python pyaudio pillow mss
+```
+"""
 
 import os
 import asyncio
 import base64
 import io
 import traceback
-import audioop
+
 import cv2
 import pyaudio
 import PIL.Image
 import mss
-
+import dotenv
+dotenv.load_dotenv()
 import argparse
 
 from google import genai
 from google.genai import types
-import dotenv
-from google.genai.types import RealtimeInputConfig, AutomaticActivityDetection, AudioTranscriptionConfig
 
-import sys, os, dotenv, pathlib
-
-# look for .env inside the bundle as well as cwd
-bundle_base = pathlib.Path(getattr(sys, "_MEIPASS", pathlib.Path.cwd()))
-dotenv.load_dotenv(bundle_base / ".env")
 FORMAT = pyaudio.paInt16
-SEND_RATE     = 16000   # for Gemini
-MIC_CHANNELS  = 1
-pya = pyaudio.PyAudio()
-# detect native rates dynamically
-input_info  = pya.get_default_input_device_info()
-output_info = pya.get_default_output_device_info()
+CHANNELS = 1
+SEND_SAMPLE_RATE = 16000
+RECEIVE_SAMPLE_RATE = 24000
+CHUNK_SIZE = 1024
 
-NATIVE_RATE  = int(input_info['defaultSampleRate'])
-RECEIVE_RATE = 24000
-
-# pick a ~40 ms chunk size
-CHUNK_NATIVE = int(NATIVE_RATE * 0.04)
-MODEL = "models/gemini-2.0-flash-live-001"
+MODEL = "models/gemini-2.5-flash-preview-native-audio-dialog"
 
 DEFAULT_MODE = "screen"
 
 client = genai.Client(
+    http_options={"api_version": "v1beta"},
     api_key=os.environ.get("GEMINI_API_KEY"),
 )
 
-tools = [
-    types.Tool(code_execution=types.ToolCodeExecution()),
-    types.Tool(google_search=types.GoogleSearch()),
-]
 
 pya = pyaudio.PyAudio()
 
@@ -65,7 +60,22 @@ class AudioLoop:
         self.send_text_task = None
         self.receive_audio_task = None
         self.play_audio_task = None
-        self.handle = None
+        self.CONFIG = types.LiveConnectConfig(
+            response_modalities=[
+                "AUDIO",
+            ],
+            media_resolution="MEDIA_RESOLUTION_LOW",
+            speech_config=types.SpeechConfig(
+                voice_config=types.VoiceConfig(
+                    prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name=self.voice_name)
+                )
+            ),
+            temperature=0.0,
+            context_window_compression=types.ContextWindowCompressionConfig(
+                trigger_tokens=25600,
+                sliding_window=types.SlidingWindow(target_tokens=12800),
+            ),
+        )
 
     async def send_text(self):
         while True:
@@ -75,9 +85,7 @@ class AudioLoop:
             )
             if text.lower() == "q":
                 break
-            await self.session.send_client_content(turns=types.Content(
-                    role="user", parts=[types.Part(text=text)]
-                ))
+            await self.session.send(input=text or ".", end_of_turn=True)
 
     def _get_frame(self, cap):
         # Read the frameq
@@ -150,136 +158,125 @@ class AudioLoop:
     async def send_realtime(self):
         while True:
             msg = await self.out_queue.get()
-            if msg.get("mime_type", "").startswith("audio"):
-                await self.session.send_realtime_input(audio=msg)
-            else:
-                await self.session.send_realtime_input(video=msg)
+            await self.session.send(input=msg)
 
     async def listen_audio(self):
-        mic = await asyncio.to_thread(
+        mic_info = pya.get_default_input_device_info()
+        self.audio_stream = await asyncio.to_thread(
             pya.open,
             format=FORMAT,
-            channels=MIC_CHANNELS,
-            rate=NATIVE_RATE,  # dynamic native rate
+            channels=CHANNELS,
+            rate=SEND_SAMPLE_RATE,
             input=True,
-            frames_per_buffer=CHUNK_NATIVE,
+            input_device_index=mic_info["index"],
+            frames_per_buffer=CHUNK_SIZE,
         )
+        if __debug__:
+            kwargs = {"exception_on_overflow": False}
+        else:
+            kwargs = {}
         while True:
-            native = await asyncio.to_thread(
-                mic.read,
-                CHUNK_NATIVE,
-                exception_on_overflow=False
-            )
-            pcm16k, _ = audioop.ratecv(  # down-sample once per 43 ms block
-                native,  # bytes
-                2,  # 2 bytes per sample (Int16)
-                MIC_CHANNELS,
-                NATIVE_RATE,
-                SEND_RATE,
-                None
-            )
-            await self.out_queue.put({
-                "data": pcm16k,
-                "mime_type": "audio/pcm"
-            })
+            data = await asyncio.to_thread(self.audio_stream.read, CHUNK_SIZE, **kwargs)
+            await self.out_queue.put({"data": data, "mime_type": "audio/pcm"})
 
     async def receive_audio(self):
         "Background task to reads from the websocket and write pcm chunks to the output queue"
         while True:
             turn = self.session.receive()
             async for response in turn:
-                if getattr(response, "session_resumption_update", None):
-                    upd = response.session_resumption_update
-                    if upd.resumable and upd.new_handle:
-                        self.handle = upd.new_handle
                 if data := response.data:
                     self.audio_in_queue.put_nowait(data)
                     continue
                 if text := response.text:
                     print(text, end="")
+
             while not self.audio_in_queue.empty():
                 self.audio_in_queue.get_nowait()
 
     async def play_audio(self):
-        spk = await asyncio.to_thread(
+        stream = await asyncio.to_thread(
             pya.open,
             format=FORMAT,
-            channels=1,
-            rate=NATIVE_RATE,
+            channels=CHANNELS,
+            rate=RECEIVE_SAMPLE_RATE,
             output=True,
         )
         while True:
-            pcm24 = await self.audio_in_queue.get()
-            # convert from 24k → native
-            pcm_native, _ = audioop.ratecv(
-                pcm24, 2, 1,
-                RECEIVE_RATE, NATIVE_RATE,
-                None
-            )
-            await asyncio.to_thread(spk.write, pcm_native)
+            bytestream = await self.audio_in_queue.get()
+            await asyncio.to_thread(stream.write, bytestream)
 
     async def run(self):
-        CONFIG = types.LiveConnectConfig(
-            response_modalities=[
-                "AUDIO",
-            ],
-            temperature=0.0,
-            speech_config=types.SpeechConfig(
-                voice_config=types.VoiceConfig(
-                    prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name=self.voice_name)
-                )
-            ),
-            tools=tools,
-            system_instruction=types.Content(
-                parts=[types.Part.from_text(
-                    text="You are professional Games QA Engineer, and there is a stream being sent to you in form of the separate frames. Answer short, dont be too talkative, but VERY emotionally and girlish.")],
-                role="user"
-            ),
-            session_resumption=types.SessionResumptionConfig(
-                handle=self.handle,
-            ),
-            context_window_compression=types.ContextWindowCompressionConfig(
-                sliding_window=types.SlidingWindow()),
-            realtime_input_config=RealtimeInputConfig(automatic_activity_detection=AutomaticActivityDetection(
-                disabled=False,
-                start_of_speech_sensitivity=types.StartSensitivity.START_SENSITIVITY_HIGH,
-                end_of_speech_sensitivity=types.EndSensitivity.END_SENSITIVITY_LOW,
-                prefix_padding_ms=25,
-                silence_duration_ms=1000)
-            )
-        )
-        async with (
-            client.aio.live.connect(model=MODEL, config=CONFIG) as session,
-            asyncio.TaskGroup() as tg,
-        ):
-            self.session = session
-            self.audio_in_queue = asyncio.Queue()
-            self.out_queue = asyncio.Queue(maxsize=5)
+        try:
+            async with (
+                client.aio.live.connect(model=MODEL, config=self.CONFIG) as session,
+                asyncio.TaskGroup() as tg,
+            ):
+                self.session = session
 
-            send_text_task = tg.create_task(self.send_text())
-            tg.create_task(self.send_realtime())
-            tg.create_task(self.listen_audio())
-            if self.video_mode == "camera":
-                tg.create_task(self.get_frames())
-            elif self.video_mode == "screen":
-                tg.create_task(self.get_screen())
+                self.audio_in_queue = asyncio.Queue()
+                self.out_queue = asyncio.Queue(maxsize=5)
 
-            tg.create_task(self.receive_audio())
-            tg.create_task(self.play_audio())
+                send_text_task = tg.create_task(self.send_text())
+                tg.create_task(self.send_realtime())
+                tg.create_task(self.listen_audio())
+                if self.video_mode == "camera":
+                    tg.create_task(self.get_frames())
+                elif self.video_mode == "screen":
+                    tg.create_task(self.get_screen())
 
-            await send_text_task
-            # This error is raised when user types 'q' in send_text
-            raise asyncio.CancelledError("User requested exit via 'q'")
+                tg.create_task(self.receive_audio())
+                tg.create_task(self.play_audio())
+
+                await send_text_task
+                raise asyncio.CancelledError("User requested exit")
+
+        except asyncio.CancelledError:
+            pass
+        except ExceptionGroup as EG:
+            self.audio_stream.close()
+            traceback.print_exception(EG)
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "voice_name",
-        type=str,
-        nargs='?',  # Makes the argument optional from CLI, will use default if not provided
-        default="Zephyr",  # Default voice
-        help="Voice to use for the assistant (e.g., Zephyr, Puck). Default: Zephyr.",
-        choices=["Puck", "Charon", "Kore", "Fenrir", "Aoede", "Leda", "Orus", "Zephyr"],
+        nargs="?",
+        default="Zephyr",
+        choices=[
+            # 30 pre-built voices in the Speech-generation guide
+            "Zephyr",  # bright
+            "Puck",  # upbeat
+            "Charon",  # informative
+            "Kore",  # firm
+            "Fenrir",  # excitable
+            "Leda",  # youthful
+            "Orus",  # firm
+            "Aoede",  # breezy
+            "Callirhoe",  # easy-going
+            "Autonoe",  # bright
+            "Enceladus",  # breathy
+            "Iapetus",  # clear
+            "Umbriel",  # easy-going
+            "Algieba",  # smooth
+            "Despina",  # smooth
+            "Erinome",  # clear
+            "Algenib",  # gravelly
+            "Rasalgethi",  # informative
+            "Laomedeia",  # upbeat
+            "Achernar",  # soft
+            "Alnilam",  # firm
+            "Schedar",  # even
+            "Gacrux",  # mature
+            "Pulcherrima",  # forward
+            "Achird",  # friendly
+            "Zubenelgenubi",  # casual
+            "Vindemiatrix",  # gentle
+            "Sadachbia",  # lively
+            "Sadaltager",  # knowledgeable
+            "Sulafar",  # warm
+        ],
+        help="Pre-built Gemini TTS voice (default: Zephyr).",
     )
 
     parser.add_argument(
@@ -287,7 +284,7 @@ if __name__ == "__main__":
         type=str,
         default=DEFAULT_MODE,
         help="pixels to stream from",
-        choices=[ "screen"],
+        choices=["screen"],
     )
     args = parser.parse_args()
     main = AudioLoop(video_mode=args.mode, voice_name=args.voice_name)
