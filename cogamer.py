@@ -232,7 +232,7 @@ class AudioLoop:
             tools=tools,
             system_instruction=types.Content(
                 parts=[types.Part.from_text(
-                    text="You are professional Games QA Engineer, and there is a stream being sent to you in form of the separate frames. ANSWER ONLY short, dont be talkative. Usually user asks you only about the current state of the screen, so the last frame")],
+                    text="You are professional Games QA Engineer, and there is a stream being sent to you in form of the separate frames. Answer short, dont be too talkative, but VERY emotionally and girlish.")],
                 role="user"
             ),
             session_resumption=types.SessionResumptionConfig(

@@ -37,7 +37,7 @@ class ChooseLanguageWindow:
 
         self.label1 = ttk.Label(self.root, text="Hello Everybody! Cogamer's greetings!\n")
         self.label1.pack()
-        self.label2 = ttk.Label(self.root, text=f"Choose a copilot voice. Now '{self.basic_voice.get()}' has chosen")
+        self.label2 = ttk.Label(self.root, text=f"Choose a copilot voice")
         self.label2.pack(padx=10, pady=6, anchor='w')
 
         for voice in self.voices.keys():
@@ -62,7 +62,7 @@ class ChooseLanguageWindow:
         self.root.mainloop()
 
     def select(self):
-        self.label2.config(text=f"Choose a copilot voice. Now '{self.basic_voice.get()}' has chosen")
+        self.label2.config(text=f"Choose a copilot voice")
 
     def exit_from_app(self):
         if self.cogamer_process and self.cogamer_process.poll() is None:  # Check if process exists and is running
