@@ -12,7 +12,13 @@ import mss.tools
 import dotenv
 import logging
 
-dotenv.load_dotenv()
+import os, sys
+from dotenv import load_dotenv
+
+base_path = getattr(sys, "_MEIPASS", os.getcwd())
+dotenv_path = os.path.join(base_path, ".env")
+
+load_dotenv(dotenv_path)
 
 from websockets.asyncio.client import connect
 from langsmith import traceable
@@ -24,6 +30,15 @@ from langchain_core.messages import HumanMessage
 # -----------------------------
 # Configuration
 # -----------------------------
+import sys, os, ssl, certifi
+
+if getattr(sys, 'frozen', False):
+    cert_path = os.path.join(sys._MEIPASS, os.path.basename(certifi.where()))
+else:
+    cert_path = certifi.where()
+
+ssl_context = ssl.create_default_context(cafile=cert_path)
+
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -43,7 +58,7 @@ URI = f"wss://{HOST}/ws/google.ai.generativelanguage.v1alpha.GenerativeService.B
 
 # LangChain Model Setup for Frame Analysis
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-model = ChatOpenAI(model="gpt-4o-mini", openai_api_key=OPENAI_API_KEY)
+model = ChatOpenAI(model="gpt-4.1-nano", api_key=OPENAI_API_KEY)
 structured_llm_frame_analysis = model.with_structured_output(FrameAnalysis)
 structured_llm_detect_game_focus_points = model.with_structured_output(DetectGameFocusPoints)
 
