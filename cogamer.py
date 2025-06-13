@@ -58,7 +58,7 @@ URI = f"wss://{HOST}/ws/google.ai.generativelanguage.v1alpha.GenerativeService.B
 
 # LangChain Model Setup for Frame Analysis
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-model = ChatOpenAI(model="gpt-4.1-nano", api_key=OPENAI_API_KEY)
+model = ChatOpenAI(model="gpt-4.1-mini", api_key=OPENAI_API_KEY)
 structured_llm_frame_analysis = model.with_structured_output(FrameAnalysis)
 structured_llm_detect_game_focus_points = model.with_structured_output(DetectGameFocusPoints)
 
