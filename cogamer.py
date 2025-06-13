@@ -12,7 +12,13 @@ import mss.tools
 import dotenv
 import logging
 
-dotenv.load_dotenv()
+import os, sys
+from dotenv import load_dotenv
+
+base_path = getattr(sys, "_MEIPASS", os.getcwd())
+dotenv_path = os.path.join(base_path, ".env")
+
+load_dotenv(dotenv_path)
 
 from websockets.asyncio.client import connect
 from langsmith import traceable
