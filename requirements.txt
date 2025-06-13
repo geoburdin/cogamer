@@ -39,3 +39,4 @@ typing_extensions==4.12.2
 urllib3==2.3.0
 websockets==14.1
 zope.interface==7.2
+tkinter==8.6
