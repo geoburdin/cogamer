@@ -70,11 +70,19 @@ class ChooseLanguageWindow:
         if self.process and self.process.poll() is None:
             self._kill_process()
 
-        print(f"Starting cogamer with voice: {chosen}")
-        self.process = subprocess.Popen(
-            [sys.executable, "cogamer.py", chosen],
-            cwd=os.path.dirname(__file__)
-        )
+        if getattr(sys, "frozen", False):
+            cogamer_exe = os.path.join(
+                os.path.dirname(sys.executable),
+                "cogamer" if sys.platform != "win32" else "cogamer.exe"
+            )
+            cmd = [cogamer_exe, chosen]
+        else:
+            cogamer_py = os.path.join(os.path.dirname(__file__), "cogamer.py")
+            cmd = [sys.executable, cogamer_py, chosen]
+
+        print("Launching:", " ".join(cmd))
+        self.process = subprocess.Popen(cmd)
+
 
 if __name__ == "__main__":
     ChooseLanguageWindow().run()
